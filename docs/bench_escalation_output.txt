@@ -1,0 +1,10 @@
+=== Allocation and Same-Day Affirmation Workflow -- cutoff escalation benchmark ===
+seeded breaches: 40
+seeded clean: 5000
+total escalations raised: 40
+
+-- claim: 40 of 40 seeded cutoff breaches escalated --
+breaches escalated: 40 / 40
+
+-- claim: 0 false escalations --
+clean allocations falsely escalated: 0 / 5000

@@ -1,0 +1,14 @@
+
+ RUN  v2.1.9 C:/Users/Manas/Downloads/Total Job Application process flow/projects/allocation-affirmation-workflow/backend
+
+ ✓ tests/fanOut.test.ts (3 tests) 4ms
+ ✓ tests/stateMachine.test.ts (7 tests) 4ms
+ ✓ tests/blockingFieldAndCutoff.test.ts (12 tests) 5ms
+ ✓ tests/rebuildOracle.test.ts (2 tests) 28ms
+ ✓ tests/api.test.ts (5 tests) 97ms
+
+ Test Files  5 passed (5)
+      Tests  29 passed (29)
+   Start at  10:35:14
+   Duration  704ms (transform 168ms, setup 0ms, collect 539ms, tests 138ms, environment 1ms, prepare 449ms)
+

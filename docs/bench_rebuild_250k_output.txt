@@ -1,0 +1,11 @@
+=== Allocation and Same-Day Affirmation Workflow -- rebuild-vs-live benchmark ===
+allocations generated: 250000
+events generated: 792442
+live state size: 250000
+rebuilt state size: 250000
+
+-- claim: status rebuilt from the append-only event log alone matched live state on all 250,000 allocations --
+compared: 250000
+matches: 250000 / 250000
+mismatches: 0
+elapsed: 906 ms
