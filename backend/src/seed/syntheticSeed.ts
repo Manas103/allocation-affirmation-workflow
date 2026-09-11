@@ -15,9 +15,12 @@ export type LifecycleScenario =
 
 const SYMBOLS = ["ACME", "GLOB", "NOVA", "ORBT", "TERA", "VELO", "ZEN", "QUAD", "PLUM", "RISE"];
 
-function pseudoRandom(seed: number): () => number {
-  // Deterministic LCG so every benchmark run and every test run generates the
-  // exact same synthetic population, byte for byte, given the same seed.
+// Deterministic LCG so every benchmark run and every test run generates the
+// exact same synthetic population, byte for byte, given the same seed.
+// Exported so the order/pre-trade-compliance and pro-rata-allocation seed
+// generators (seed/orderSeed.ts) reuse the exact same generator rather than
+// inventing a second one.
+export function pseudoRandom(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0;

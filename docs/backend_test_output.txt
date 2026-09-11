@@ -1,14 +1,18 @@
 
- RUN  v2.1.9 C:/Users/Manas/Downloads/Total Job Application process flow/projects/allocation-affirmation-workflow/backend
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/Manas/Downloads/Total Job Application process flow/projects/allocation-affirmation-workflow/backend[39m
 
- ✓ tests/fanOut.test.ts (3 tests) 4ms
- ✓ tests/stateMachine.test.ts (7 tests) 4ms
- ✓ tests/blockingFieldAndCutoff.test.ts (12 tests) 5ms
- ✓ tests/rebuildOracle.test.ts (2 tests) 28ms
- ✓ tests/api.test.ts (5 tests) 97ms
+ [32m✓[39m tests/orderLifecycle.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+ [32m✓[39m tests/fanOut.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 4[2mms[22m[39m
+ [32m✓[39m tests/stateMachine.test.ts [2m([22m[2m7 tests[22m[2m)[22m[90m 5[2mms[22m[39m
+ [32m✓[39m tests/orderRebuildOracle.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+ [32m✓[39m tests/preTradeCompliance.test.ts [2m([22m[2m13 tests[22m[2m)[22m[90m 12[2mms[22m[39m
+ [32m✓[39m tests/blockingFieldAndCutoff.test.ts [2m([22m[2m12 tests[22m[2m)[22m[90m 6[2mms[22m[39m
+ [32m✓[39m tests/rebuildOracle.test.ts [2m([22m[2m2 tests[22m[2m)[22m[90m 25[2mms[22m[39m
+ [32m✓[39m tests/proRataAllocator.test.ts [2m([22m[2m10 tests[22m[2m)[22m[90m 226[2mms[22m[39m
+ [32m✓[39m tests/api.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 92[2mms[22m[39m
 
- Test Files  5 passed (5)
-      Tests  29 passed (29)
-   Start at  10:35:14
-   Duration  704ms (transform 168ms, setup 0ms, collect 539ms, tests 138ms, environment 1ms, prepare 449ms)
+[2m Test Files [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+[2m      Tests [22m [1m[32m60 passed[39m[22m[90m (60)[39m
+[2m   Start at [22m 20:51:12
+[2m   Duration [22m 764ms[2m (transform 487ms, setup 0ms, collect 1.06s, tests 376ms, environment 2ms, prepare 837ms)[22m
 

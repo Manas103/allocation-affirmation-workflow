@@ -8,4 +8,4 @@ rebuilt state size: 250000
 compared: 250000
 matches: 250000 / 250000
 mismatches: 0
-elapsed: 906 ms
+elapsed: 867 ms

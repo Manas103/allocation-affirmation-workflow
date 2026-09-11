@@ -20,10 +20,22 @@ interface AtRiskAllocation {
   blockingField: string | null;
 }
 
+interface OrderRow {
+  orderId: string;
+  account: string;
+  symbol: string;
+  quantity: number;
+  state: string;
+  rejectionRule: string | null;
+  rejectionDetail: string | null;
+}
+
 export function App() {
   const [rows, setRows] = useState<AtRiskAllocation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -39,8 +51,25 @@ export function App() {
     }
   }
 
+  // The order-lifecycle section is deliberately independent of the at-risk
+  // load above: it never touches `rows`, `error`, or `loading`, so a failure
+  // here can never affect the at-risk feed this console originally shipped
+  // with.
+  async function loadOrders() {
+    try {
+      const res = await fetch(`${API_BASE}/orders`);
+      if (!res.ok) throw new Error(`GET /orders -> ${res.status}`);
+      const data = (await res.json()) as OrderRow[];
+      setOrders(data);
+      setOrdersError(null);
+    } catch (err) {
+      setOrdersError((err as Error).message);
+    }
+  }
+
   useEffect(() => {
     load();
+    loadOrders();
   }, []);
 
   return (
@@ -81,6 +110,42 @@ export function App() {
         </tbody>
       </table>
       {!loading && rows.length === 0 && !error && <p>No at-risk allocations.</p>}
+
+      <h2>Order lifecycle</h2>
+      <p>
+        The front half of the same audit trail: creation, pre-trade compliance, release and fill, each one an event
+        on the same append-only log the allocations above are read from. A rejected order names the exact rule and
+        input that failed it.
+      </p>
+      <button onClick={loadOrders}>Refresh orders</button>
+      {ordersError && <p role="alert">Failed to load orders: {ordersError}</p>}
+      <table>
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Account</th>
+            <th>Symbol</th>
+            <th>Qty</th>
+            <th>State</th>
+            <th>Rejection</th>
+          </tr>
+        </thead>
+        <tbody>
+          {orders.map((order) => (
+            <tr key={order.orderId} data-testid="order-row">
+              <td>{order.orderId}</td>
+              <td>{order.account}</td>
+              <td>{order.symbol}</td>
+              <td>{order.quantity}</td>
+              <td>{order.state}</td>
+              <td data-testid="order-rejection">
+                {order.rejectionRule ? `${order.rejectionRule}: ${order.rejectionDetail}` : "(none)"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {orders.length === 0 && !ordersError && <p>No orders yet.</p>}
     </main>
   );
 }

@@ -1,15 +1,22 @@
-# Allocation and Same-Day Affirmation Workflow with an Operations Console
+# Trade Order Lifecycle with Pre-Trade Compliance, Pro-Rata Allocation and Same-Day Affirmation
 
-A block trade is not one thing settling; it is dozens of client-account
-allocations, each racing its own same-day affirmation cutoff. This project
-fans a simulated block trade into allocations, drives each through an
-explicit `allocated -> confirmed -> affirmed -> instructed` state machine
-against a trade-date cutoff clock, escalates anything unaffirmed at the
-cutoff, and puts a React console in front of it that names the exact field
-blocking every at-risk allocation. Every number below was measured on this
-machine, not targeted: the two seeded benchmarks (250,000-allocation rebuild
-match, 40-of-40 cutoff escalation with 0 false escalations) both cleared on
-their first run.
+A block trade is not one thing settling; it is an order created against a
+position book, checked against pre-trade compliance rules, released, filled,
+split pro-rata across dozens of client-account allocations, and then each of
+those allocations races its own same-day affirmation cutoff. This project
+covers the whole chain on one append-only event log: order creation,
+pre-trade compliance (restricted-list, concentration, cash-sufficiency),
+release, fill, pro-rata allocation, and the existing
+`allocated -> confirmed -> affirmed -> instructed` state machine against a
+trade-date cutoff clock, escalating anything unaffirmed at the cutoff. A
+React console sits in front of both halves: the exact field blocking every
+at-risk allocation, and the exact rule and input that rejected a blocked
+order. Every number below was measured on this machine, not targeted: all
+four seeded benchmarks (250,000-allocation rebuild match, 40-of-40 cutoff
+escalation with 0 false escalations, 40-of-40 pre-trade breaches blocked with
+0 false blocks over 5,000 clean orders, and pro-rata share conservation over
+250,000 allocations) cleared on their first run; the one place a real bug was
+found and fixed is in Findings below.
 
 ## Why this exists
 
@@ -22,12 +29,25 @@ machine's output auditable: every transition is a fact appended once, never
 an in-place update, and the served "live" state is provably just a cache of
 that log, not a second source of truth that can quietly drift from it.
 
+The same discipline extends backward, to before an allocation exists at all.
+An order that reaches a client account has already cleared a compliance
+gate and been split across accounts by a rule that cannot lose or invent a
+share; those two facts belong on the same auditable log as everything that
+happens to the allocation afterward, not in a separate system that has to be
+reconciled against this one by hand.
+
 ## Honest framing, up front
 
-- **This is a simulated allocation workflow, not a connection to any real
-  custodian, broker, or clearing system.** There is no real trade, no real
-  account, no real cutoff enforced by an outside party. `syntheticSeed.ts`
-  generates every block trade, account, and lifecycle event used below.
+- **This is a simulated order and allocation workflow, not a connection to
+  any real custodian, broker, order management system, or clearing system.**
+  There is no real trade, no real account, no real cutoff enforced by an
+  outside party. `syntheticSeed.ts` and `orderSeed.ts` generate every order,
+  block trade, account, position, and lifecycle event used below.
+- **The position book behind pre-trade compliance is a simplified synthetic
+  book (`domain/positionBook.ts`), not a real custodian or PMS position
+  record.** It carries exactly the two numbers the three pre-trade rules
+  need per account, cash and per-symbol holding value, and nothing else (no
+  lots, no historical prices).
 - **Postgres is not installed as a service on this machine.** The backend
   defaults to `pg-mem`, a real, in-process SQL engine: the exact same SQL in
   `schema.ts` and `eventStore.ts` runs against it as would run against real
@@ -55,23 +75,38 @@ backend/src/
     blockingField.ts     names the single field blocking an allocation right now
     cutoff.ts            shouldEscalate: pure decision, past cutoff and not yet affirmed
     cutoffSweep.ts       scans live views, produces the CUTOFF_ESCALATED events to append
+    orderTypes.ts        OrderEvent union (creation through fill), OrderView, OrderState
+    positionBook.ts      AccountPosition: the two numbers pre-trade compliance needs
+    preTradeCompliance.ts  restricted-list, cash-sufficiency, concentration; each
+                          rejection names the exact rule and failing input
+    proRataAllocator.ts  allocateProRata: largest-remainder pro-rata split, share-exact
+    lifecycleEvent.ts    the union of OrderEvent and AllocationEvent that the store persists
   store/
-    schema.ts            the append-only allocation_events table (real SQL)
+    schema.ts            the append-only allocation_events table (real SQL, now stores
+                          both order and allocation events by discriminated type)
     eventStore.ts        appendEvent / appendEventsBatch / getAllEventsOrdered (real SQL)
-    liveProjector.ts      LiveStateProjector: the served in-memory read model
-    rebuildOracle.ts      rebuildFromLog: a SEPARATE, O(events)-per-allocation reducer,
-                          diffed field-by-field against the live projector
+    liveProjector.ts      LiveStateProjector (allocations) and LiveOrderProjector (orders):
+                          the served in-memory read models
+    rebuildOracle.ts      rebuildFromLog / rebuildOrdersFromLog: SEPARATE, from-scratch
+                          reducers, each diffed field-by-field against its live projector
     pool.ts               pg-mem by default, real Postgres via DATABASE_URL
-  api/server.ts          Express routes: block-trades, lifecycle events, cutoff-sweep,
-                          allocations, allocations/at-risk, demo/seed
-  seed/syntheticSeed.ts   deterministic (seeded LCG) synthetic population generators,
-                          incl. the two generators the benchmarks below are built on
+  api/server.ts          Express routes: orders (create/pretrade-check/release/fill),
+                          block-trades, lifecycle events, cutoff-sweep, allocations,
+                          allocations/at-risk, demo/seed, demo/seed-orders
+  seed/
+    syntheticSeed.ts      deterministic (seeded LCG) synthetic allocation-side generators;
+                          exports the one pseudoRandom LCG every other generator reuses
+    orderSeed.ts          generateSeededBreachOrders (40, one per rule violation) and
+                          generateCleanOrders (5,000 that pass every rule)
   scripts/
-    bench_rebuild_250k.ts    the 250,000-allocation rebuild-vs-live benchmark
-    bench_escalation.ts      the 40-seeded-breach / 5,000-clean escalation benchmark
-  tests/                 29 Vitest tests (domain, rebuild-oracle diff, API via supertest)
+    bench_rebuild_250k.ts               the 250,000-allocation rebuild-vs-live benchmark
+    bench_escalation.ts                 the 40-seeded-breach / 5,000-clean escalation benchmark
+    bench_pretrade_compliance.ts        the 40-of-40 blocked / 0-false-blocks-over-5,000 benchmark
+    bench_prorata_allocation_250k.ts    the 250,000-allocation share-conservation benchmark
+  tests/                 60 Vitest tests (domain, both rebuild-oracle diffs, API via supertest)
 frontend/
-  src/App.tsx            the console: fetches /allocations/at-risk, names the blocking field
+  src/App.tsx            the console: /allocations/at-risk (blocking field) and /orders
+                          (order state and, for a rejected order, the exact rule and input)
   tests/console.spec.ts   Playwright end-to-end test, starts both real servers itself
 ```
 
@@ -96,6 +131,38 @@ event, so an allocation whose confirmation arrives last still walks
 `allocated -> confirmed -> affirmed` in that one event, instead of getting
 stuck one step behind because the state machine only checked the gate that
 event's own type "usually" advances.
+
+### Why every pre-trade rejection carries the failing input, not just a rule name
+
+A rejection that says only "CONCENTRATION" sends an operator back to the
+position book to reconstruct what actually happened. `checkConcentration`
+instead computes and reports the resulting percentage and the limit it
+would have breached; `checkCashSufficiency` reports the exact shortfall in
+dollars. This mirrors `blockingField.ts`'s existing convention on the
+allocation side of this same repo: a caller is never told just "no", only
+what to look at.
+
+### Why the pro-rata allocator uses the largest-remainder method, not independent rounding
+
+Rounding each account's share independently (`Math.round(filled * weight /
+total)`) is the obvious first implementation, and it does not conserve
+shares: the rounded pieces do not, in general, sum back to the filled
+quantity. `allocateProRata` instead gives every account the floor of its
+exact share, then hands out the leftover whole shares, an exact integer by
+construction, one each to the accounts with the largest fractional
+remainder. Conservation holds by construction, not by luck; see Findings for
+the property test that caught the first implementation failing this.
+
+### Why the order and allocation halves share one event table
+
+`lifecycleEvent.ts`'s `LifecycleEvent` union and `streamIdOf` function are
+the entire bridge between the two halves: `schema.ts` and `eventStore.ts`
+persist whichever kind of event they are given, keyed on whichever id it
+carries. This is what makes "one audit trail from order to allocation" true
+in the schema, not just in the README's prose: `rebuildOrdersFromLog` can
+rebuild every order's state from the same table `rebuildFromLog` rebuilds
+every allocation's state from, because both reducers simply ignore the
+event types that are not theirs.
 
 ### Why the console is a separate at-risk endpoint, not a client-side filter
 
@@ -152,21 +219,73 @@ clean allocations falsely escalated: 0 / 5000
 
 Full output: `docs/bench_escalation_output.txt`.
 
+### Pre-trade compliance (40 seeded breaches, one rule each, and a 5,000-order clean control)
+
+`bench_pretrade_compliance.ts` runs `generateSeededBreachOrders` (14
+restricted-list, 13 cash-sufficiency, 13 concentration, 40 total, each
+order built with enough margin on the two rules it is not meant to fail that
+only its intended rule can ever fire) and `generateCleanOrders(seed, 5000)`
+through `runPreTradeChecks` exactly as the API's `/orders/:id/pretrade-check`
+route would.
+
+```
+$ npx tsx scripts/bench_pretrade_compliance.ts
+=== Trade Order Lifecycle -- pre-trade compliance benchmark ===
+seeded breaches: 40
+seeded clean: 5000
+
+-- claim: 40 of 40 seeded breaches blocked --
+breaches blocked: 40 / 40
+breaches blocked naming the exact intended rule: 40 / 40
+
+-- claim: 0 false blocks over 5,000 clean orders --
+clean orders falsely blocked: 0 / 5000
+```
+
+Full output: `docs/bench_pretrade_compliance_output.txt`.
+
+### Pro-rata allocation conservation (250,000 allocations)
+
+`bench_prorata_allocation_250k.ts` generates orders with 2 to 49 randomized
+client-account weights and a randomized filled quantity until the running
+total of individual (order, account) allocations reaches 250,000, calling
+`allocateProRata` once per order and checking that the sum of every
+account's allocated quantity exactly equals the filled quantity, for every
+single order, not on average.
+
+```
+$ npx tsx scripts/bench_prorata_allocation_250k.ts
+=== Trade Order Lifecycle -- pro-rata allocation conservation benchmark ===
+orders generated: 9845
+allocations generated: 250002
+
+-- claim: pro-rata allocator conserved every share across 250,000 allocations --
+conservation failures: 0 / 9845 orders
+non-integer allocation failures: 0
+negative allocation failures: 0
+```
+
+Full output: `docs/bench_prorata_allocation_250k_output.txt`.
+
 ### Tests
 
-29 backend Vitest tests: 3 fan-out tests (including the pro-rata remainder
+60 backend Vitest tests: 3 fan-out tests (including the pro-rata remainder
 split), 7 state-machine tests (including the out-of-order cascade above and
 the append-only duplicate-creation guard), 12 blocking-field/cutoff tests
 (one per named blocking field, plus the "never re-escalate" and "never
-escalate once affirmed" invariants), 2 reference-oracle diff tests, and 5
-API tests via `supertest` against a real `pg-mem`-backed app instance,
-covering fan-out, the full lifecycle, the at-risk feed, the cutoff sweep,
+escalate once affirmed" invariants), 2 allocation reference-oracle diff
+tests, 2 order reference-oracle diff tests, 6 order-lifecycle tests, 13
+pre-trade compliance tests (each rule's pass and fail path, plus the seeded
+breach and clean generators), 10 pro-rata allocator tests (fixed examples
+plus a 500-trial randomized property test for share conservation), and 5 API
+tests via `supertest` against a real `pg-mem`-backed app instance, covering
+fan-out, the full allocation lifecycle, the at-risk feed, the cutoff sweep,
 and the 404 on an unknown allocation.
 
 ```
 $ npx vitest run
- Test Files  5 passed (5)
-      Tests  29 passed (29)
+ Test Files  9 passed (9)
+      Tests  60 passed (60)
 ```
 
 Full transcript: `docs/backend_test_output.txt`.
@@ -223,6 +342,48 @@ entirely in the boundary between two real processes, which is exactly the
 boundary a component test does not cross and an end-to-end Playwright test
 does.
 
+## Findings: independent rounding does not conserve shares
+
+**Symptom.** The first `allocateProRata` implementation rounded each
+account's share independently, `Math.round(filledQuantity * weight /
+totalWeight)`. The property test in `tests/proRataAllocator.test.ts`
+(500 randomized `(accounts, weights, filledQuantity)` configurations)
+failed on a visible minority of trials with the sum of the rounded shares
+one or two shares off from the filled quantity, in either direction.
+
+**Wrong hypothesis first.** The first guess was a floating-point precision
+issue in the weight division itself, since `weight / totalWeight` is not
+always exact in binary floating point. That hypothesis did not survive
+inspection of the failing cases: the per-account errors were exactly plus
+or minus one whole share, not a fractional residue, which is the signature
+of independent rounding rather than of floating-point error.
+
+**The measurement that discriminated.** Summing the *unrounded* exact shares
+for a failing trial always reproduced the filled quantity exactly (as it
+must, since the weights are a partition); summing the *rounded* shares did
+not. That isolated the bug to the rounding step itself, not to the division
+that produced the shares being rounded.
+
+**Root cause.** `Math.round` on N independent numbers has no relationship
+to each other's rounding direction; nothing prevents all N roundings from
+going up, or all N from going down, and the accumulated error is unbounded
+in the number of accounts.
+
+**Fix.** The largest-remainder method now in `proRataAllocator.ts`: floor
+every account's exact share, then hand out the leftover whole shares
+(`filledQuantity - sum(floors)`, an exact integer by construction, since
+`filledQuantity` was validated as an integer and every floor is an integer)
+one each to the accounts with the largest fractional remainder. The 500-trial
+property test and the 250,000-allocation scale benchmark both now pass with
+zero conservation failures.
+
+**Why the method mattered.** A single fixed example (three equal accounts
+splitting a quantity divisible by three) would never have exposed this: the
+bug only appears when the weights and quantity conspire to round in the same
+direction more often than not, which is exactly what a randomized property
+test across many weight shapes is built to find and a handful of hand-picked
+examples is not.
+
 ## Measured results
 
 AMD Ryzen 7 7800X3D, 8 physical / 16 logical cores, Windows 11 Home,
@@ -231,11 +392,14 @@ Node.js v22.17.1.
 | Metric | Measured | Claim |
 |---|---|---|
 | **Status rebuilt from the log alone matched live state** | **250,000 / 250,000** | all 250,000 allocations |
-| Rebuild-vs-live comparison wall time | 906 ms | (not claimed; included so the number above is not read as untimed) |
+| Rebuild-vs-live comparison wall time | 811 ms (re-measured for this build; original run was 906 ms, both well within this repo's usual run-to-run noise) | (not claimed; included so the number above is not read as untimed) |
 | **Seeded cutoff breaches escalated** | **40 / 40** | 40 of 40 |
 | **False escalations on 5,000 clean allocations** | **0** | 0 |
-| Backend tests passing | 29 / 29 | (not a resume bullet; supports every claim above) |
-| Console end-to-end test | 1 / 1 passing | React console naming the exact field blocking every at-risk allocation |
+| **Seeded pre-trade breaches blocked, naming the exact intended rule** | **40 / 40** | 40 of 40 seeded breaches blocked |
+| **False blocks on 5,000 clean orders** | **0** | 0 |
+| **Shares conserved across the pro-rata allocation benchmark** | **250,002 / 250,002 allocations, 9,845 / 9,845 orders** | every share conserved across 250,000 allocations |
+| Backend tests passing | 60 / 60 | (not a resume bullet; supports every claim above) |
+| Console end-to-end test | 1 / 1 passing | React console naming the exact field blocking every at-risk allocation and, for orders, the exact rejecting rule |
 
 "Matched live state" means: for every allocation id that exists in either
 the live projector or the from-scratch rebuild, every field of the two views
@@ -247,16 +411,24 @@ makes this structurally hard to get wrong (an already-affirmed allocation is
 excluded by state, not by timing), which is exactly why the 0/5,000 result
 here is a confirmation of that design rather than a surprise.
 
+"False block" means a clean order, one built to pass all three pre-trade
+rules with margin, was still rejected; "conserved every share" means, for
+every single order in the 250,000-allocation benchmark, the sum of every
+account's allocated quantity equals the order's filled quantity exactly, an
+integer equality check, not a tolerance.
+
 ## Building and running
 
 ```bash
 cd backend
 npm install
-npm test                                   # 29 Vitest tests, pg-mem, ~1s
-npx tsx scripts/bench_rebuild_250k.ts      # the 250,000-allocation rebuild benchmark
-npx tsx scripts/bench_escalation.ts        # the 40-seeded-breach escalation benchmark
-npm run build                              # tsc -b
-PORT=0 node dist/index.js                  # prints LISTENING_ON <port>; PORT=0 asks the OS for a free port
+npm test                                            # 60 Vitest tests, pg-mem, ~6s
+npx tsx scripts/bench_rebuild_250k.ts               # the 250,000-allocation rebuild benchmark
+npx tsx scripts/bench_escalation.ts                 # the 40-seeded-breach escalation benchmark
+npx tsx scripts/bench_pretrade_compliance.ts        # the 40-of-40 blocked / 0-false-blocks benchmark
+npx tsx scripts/bench_prorata_allocation_250k.ts    # the 250,000-allocation share-conservation benchmark
+npm run build                                       # tsc -b
+PORT=0 node dist/index.js                           # prints LISTENING_ON <port>; PORT=0 asks the OS for a free port
 ```
 
 ```bash
@@ -295,10 +467,11 @@ check, is built to catch.
 
 ## Limitations
 
-- **In-memory live projector.** `LiveStateProjector` lives in Node process
-  memory; a restart loses the served read model, which would need to be
-  rebuilt from the durable event log before serving traffic again (the
-  rebuild path this project already has, just not wired to run on startup).
+- **In-memory live projectors.** `LiveStateProjector` and `LiveOrderProjector`
+  live in Node process memory; a restart loses the served read model, which
+  would need to be rebuilt from the durable event log before serving traffic
+  again (the rebuild path this project already has, just not wired to run on
+  startup).
 - **The cutoff sweep is triggered on demand (`POST /cutoff-sweep`), not on a
   scheduler.** A real deployment would call it on a timer; nothing in this
   project's measured claims depends on how often that timer fires, only on
@@ -306,6 +479,19 @@ check, is built to catch.
 - **CORS is wide open (`*`).** Acceptable for a synthetic local demo console
   talking to a synthetic local API; not a pattern to carry into a real
   deployment serving anything non-public.
-- **No throughput claim.** The 906 ms rebuild-benchmark time is a single-run
-  wall-clock number on a shared development machine, not a controlled
+- **No throughput claim.** The rebuild-benchmark times are single-run
+  wall-clock numbers on a shared development machine, not a controlled
   throughput benchmark.
+- **The position book is a simplified two-number-per-account model**, not a
+  real custodian or PMS position feed with lots, historical prices, or
+  corporate actions; the three pre-trade rules only ever need cash and a
+  per-symbol book-value fraction, so that is all the book carries.
+- **Pre-trade compliance runs three rules in a fixed order and stops at the
+  first failure.** The seeded breach population is deliberately constructed
+  so each order can only ever fail one rule; a real order that violates two
+  rules at once would only ever be reported for the first one checked
+  (restricted-list, then cash, then concentration).
+- **The pro-rata allocator takes target weights as an input, not a model of
+  how those weights were decided.** Where the weights come from (a
+  portfolio manager's target allocation, an existing position ratio, or
+  something else) is out of scope for this project.

@@ -1,0 +1,8 @@
+=== Trade Order Lifecycle -- pro-rata allocation conservation benchmark ===
+orders generated: 9845
+allocations generated: 250002
+
+-- claim: pro-rata allocator conserved every share across 250,000 allocations --
+conservation failures: 0 / 9845 orders
+non-integer allocation failures: 0
+negative allocation failures: 0

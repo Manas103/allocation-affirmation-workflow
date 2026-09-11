@@ -1,0 +1,10 @@
+=== Trade Order Lifecycle -- pre-trade compliance benchmark ===
+seeded breaches: 40
+seeded clean: 5000
+
+-- claim: 40 of 40 seeded breaches blocked --
+breaches blocked: 40 / 40
+breaches blocked naming the exact intended rule: 40 / 40
+
+-- claim: 0 false blocks over 5,000 clean orders --
+clean orders falsely blocked: 0 / 5000

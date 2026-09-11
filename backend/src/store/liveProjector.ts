@@ -1,5 +1,7 @@
 import { AllocationEvent, AllocationView } from "../domain/types.js";
 import { applyEvent } from "../domain/stateMachine.js";
+import { OrderEvent, OrderView } from "../domain/orderTypes.js";
+import { applyOrderEvent } from "../domain/orderLifecycle.js";
 
 // The "fast" production path: an in-memory read model kept current by
 // applying each event once, at write time, instead of re-reading the whole
@@ -35,5 +37,41 @@ export class LiveStateProjector {
 
   snapshot(): Map<string, AllocationView> {
     return new Map(this.byAllocation);
+  }
+}
+
+// The same fast, served-read-model discipline as LiveStateProjector above,
+// for the order half of the lifecycle: applyOrderEvent folded forward one
+// event at a time. store/rebuildOracle.ts's rebuildOrdersFromLog is what
+// proves this class never drifts from the log, the same way rebuildFromLog
+// proves LiveStateProjector never does.
+export class LiveOrderProjector {
+  private readonly byOrder = new Map<string, OrderView>();
+
+  apply(event: OrderEvent): OrderView {
+    const prior = this.byOrder.get(event.orderId);
+    const next = applyOrderEvent(prior, event);
+    this.byOrder.set(event.orderId, next);
+    return next;
+  }
+
+  applyMany(events: OrderEvent[]): void {
+    for (const event of events) this.apply(event);
+  }
+
+  get(orderId: string): OrderView | undefined {
+    return this.byOrder.get(orderId);
+  }
+
+  all(): OrderView[] {
+    return Array.from(this.byOrder.values());
+  }
+
+  size(): number {
+    return this.byOrder.size;
+  }
+
+  snapshot(): Map<string, OrderView> {
+    return new Map(this.byOrder);
   }
 }
